@@ -165,7 +165,7 @@ def _half_page(title: str, half_plan: List[Dict], version_label: str = "") -> li
     items.append(_page_title_table(title, version_label))
     items.append(Spacer(1, 0.10 * inch))
 
-    # Group by type but maintain live sequence order
+    # Iterate in live sequence order (already interleaved O/D)
     for poss in half_plan:
         items += _possession_block(poss)
 
@@ -287,7 +287,7 @@ def _stats_page(
         for name, data in sorted(bench_patterns.items(),
                                   key=lambda x: -x[1]["total_bench"]):
             viol = data["consecutive_violations"]
-            viol_str = f"⚠ {viol}" if viol else "✓ 0"
+            viol_str = f"⚠  {viol}" if viol else "✓  0"
             bench_data.append([
                 name,
                 str(data["total_bench"]),

@@ -164,9 +164,6 @@ def _generate_sequence(
                     play_counts[p["id"]][phase] += 1
 
                 # Update no-sit-twice tracking
-                # Players in bench who are eligible for this phase
-                bench_ids = {p["id"] for p in bench}
-
                 if phase == "offense":
                     must_next_offense = set()  # consumed; reset
                     for p in bench:
