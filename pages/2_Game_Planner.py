@@ -70,12 +70,12 @@ with st.sidebar:
     st.markdown("### 🏈 QB Selection")
     
     qb_hint_cols = st.columns(1)
-    recommend_btn = st.button("⭐ Recommend Best 2 QBs")
+    recommend_clicked = st.button("⭐ Recommend Best 2 QBs")
     
     qb_eligible_map = {}
     qb_pool = sorted([p for p in active if p.get("can_play_qb")], key=lambda x: -x.get("qb_rating", 0))
     
-    if recommend_btn:
+    if recommend_clicked:
         recommended_ids = [p["id"] for p in qb_pool[:2]]
         st.session_state["recommended_qb_ids"] = recommended_ids
     

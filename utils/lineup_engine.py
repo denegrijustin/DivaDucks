@@ -28,8 +28,6 @@ def select_qbs(available_players: List[Dict], qb_eligible_ids: List[int]) -> tup
     qb_pool_sorted = sorted(qb_pool, key=lambda x: x.get("qb_rating", 0), reverse=True)
     if len(qb_pool_sorted) == 1:
         return qb_pool_sorted[0], qb_pool_sorted[0]
-    elif len(qb_pool_sorted) == 2:
-        return qb_pool_sorted[0], qb_pool_sorted[1]
     else:
         return qb_pool_sorted[0], qb_pool_sorted[1]
 
