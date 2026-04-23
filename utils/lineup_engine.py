@@ -1,5 +1,4 @@
-from typing import List, Dict, Any, Optional
-import random
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 OFFENSE_POSITION_RATINGS = {
     "QB": "qb_rating",
@@ -21,231 +20,339 @@ DEFENSE_POSITION_RATINGS = {
     "Blitzer": "blitzer_rating",
 }
 
+
+def friendly_rank_label(rank: float) -> str:
+    """Return a human-readable label for a lineup rank (1-10 scale)."""
+    if rank >= 8.0:
+        return "Elite"
+    elif rank >= 6.5:
+        return "Strong"
+    elif rank >= 5.0:
+        return "Solid"
+    elif rank >= 3.5:
+        return "Average"
+    else:
+        return "Developing"
+
+
 def select_qbs(available_players: List[Dict], qb_eligible_ids: List[int]) -> tuple:
+    """Return (qb_half1, qb_half2). If 1 QB, she plays both halves. If >2, pick top 2 by rating."""
     qb_pool = [p for p in available_players if p["id"] in qb_eligible_ids and p.get("qb_eligible", True)]
     if not qb_pool:
         return None, None
     qb_pool_sorted = sorted(qb_pool, key=lambda x: x.get("qb_rating", 0), reverse=True)
     if len(qb_pool_sorted) == 1:
         return qb_pool_sorted[0], qb_pool_sorted[0]
-    else:
-        return qb_pool_sorted[0], qb_pool_sorted[1]
+    return qb_pool_sorted[0], qb_pool_sorted[1]
 
-def assign_positions(players: List[Dict], position_ratings: Dict[str, str], locked: Dict[str, Dict] = None) -> Dict[str, Dict]:
-    assignment = {}
-    if locked:
-        assignment.update(locked)
-    remaining_positions = [p for p in position_ratings if p not in assignment]
-    remaining_players = [p for p in players if p not in assignment.values()]
-    
-    # Greedy assignment: best player for each position
-    for pos in remaining_positions:
-        rating_key = position_ratings[pos]
-        best = max(remaining_players, key=lambda x: x.get(rating_key, 0), default=None)
-        if best:
-            assignment[pos] = best
-            remaining_players.remove(best)
-    
-    return assignment
 
 def compute_lineup_rank(assignment: Dict[str, Dict], position_ratings: Dict[str, str]) -> float:
     if not assignment:
         return 0.0
-    total = sum(assignment[pos].get(position_ratings[pos], 0) for pos in assignment if pos in position_ratings)
+    total = sum(
+        assignment[pos].get(position_ratings[pos], 0)
+        for pos in assignment
+        if pos in position_ratings
+    )
     return round(total / max(len(assignment), 1), 2)
 
-def generate_game_plan(
+
+def generate_game_plans(
     available_players: List[Dict],
     qb_half1_id: int,
     qb_half2_id: int,
     settings: Dict[str, Any],
-    mode: str = "Fair Rotation"
+    mode: str = "Fair Rotation",
+) -> Dict[str, List[Dict]]:
+    """
+    Generate both game-flow versions.
+
+    Returns:
+        {
+            "offense_first": [...possessions in O,D,O,D order...],
+            "defense_first": [...possessions in D,O,D,O order...],
+        }
+    """
+    return {
+        "offense_first": _generate_sequence(
+            available_players, qb_half1_id, qb_half2_id, settings, mode,
+            start_on_offense=True
+        ),
+        "defense_first": _generate_sequence(
+            available_players, qb_half1_id, qb_half2_id, settings, mode,
+            start_on_offense=False
+        ),
+    }
+
+
+def _generate_sequence(
+    available_players: List[Dict],
+    qb_half1_id: int,
+    qb_half2_id: int,
+    settings: Dict[str, Any],
+    mode: str,
+    start_on_offense: bool,
 ) -> List[Dict]:
+    """
+    Generate one interleaved possession sequence enforcing the no-sit-twice hard rule.
+
+    The no-sit-twice rule:
+    - Two-way players who sit at possession N must play at possession N+1 in the live sequence.
+    - offense_only players who sit at an offense possession must play at the next offense possession.
+    - defense_only players who sit at a defense possession must play at the next defense possession.
+    """
     possessions_per_half = settings.get("possessions_per_half", 3)
     halves = settings.get("halves", 2)
-    
-    all_possessions = []
-    possession_num = 0
-    
-    # Track play counts for fairness
-    play_counts = {p["id"]: {"offense": 0, "defense": 0} for p in available_players}
-    
+
+    play_counts: Dict[int, Dict[str, int]] = {
+        p["id"]: {"offense": 0, "defense": 0} for p in available_players
+    }
+
+    # No-sit-twice tracking per phase
+    must_next_offense: Set[int] = set()  # IDs who MUST be in next offense possession
+    must_next_defense: Set[int] = set()  # IDs who MUST be in next defense possession
+
+    all_possessions: List[Dict] = []
+    seq_num = 0
+
     for half in range(1, halves + 1):
         qb_id = qb_half1_id if half == 1 else qb_half2_id
         qb = next((p for p in available_players if p["id"] == qb_id), None)
-        
-        for poss in range(1, possessions_per_half + 1):
-            possession_num += 1
-            
-            # --- OFFENSE ---
-            offense_players = _select_best_7(
-                available_players, play_counts, "offense", qb, mode, 
-                exclude_flags=["defense_only"]
-            )
-            offense_assignment = _assign_offense(offense_players, qb)
-            offense_rank = compute_lineup_rank(offense_assignment, OFFENSE_POSITION_RATINGS)
-            players_out_offense = [p["name"] for p in available_players if p not in offense_players and not p.get("defense_only")]
-            
-            all_possessions.append({
-                "half": half,
-                "possession": poss,
-                "possession_num": possession_num,
-                "type": "Offense",
-                "label": f"{'1st' if half==1 else '2nd'} Half Possession {poss} Offense",
-                "assignment": {pos: p["name"] for pos, p in offense_assignment.items()},
-                "players": [p["name"] for p in offense_players],
-                "players_out": players_out_offense,
-                "lineup_rank": offense_rank,
-                "notes": _lineup_notes(offense_players, offense_assignment, "offense"),
-            })
-            _update_counts(play_counts, offense_players, "offense")
-            
-            # --- DEFENSE ---
-            defense_players = _select_best_7(
-                available_players, play_counts, "defense", None, mode,
-                exclude_flags=["offense_only"]
-            )
-            defense_assignment = _assign_defense(defense_players)
-            defense_rank = compute_lineup_rank(defense_assignment, DEFENSE_POSITION_RATINGS)
-            players_out_defense = [p["name"] for p in available_players if p not in defense_players and not p.get("offense_only")]
-            
-            all_possessions.append({
-                "half": half,
-                "possession": poss,
-                "possession_num": possession_num,
-                "type": "Defense",
-                "label": f"{'1st' if half==1 else '2nd'} Half Possession {poss} Defense",
-                "assignment": {pos: p["name"] for pos, p in defense_assignment.items()},
-                "players": [p["name"] for p in defense_players],
-                "players_out": players_out_defense,
-                "lineup_rank": defense_rank,
-                "notes": _lineup_notes(defense_players, defense_assignment, "defense"),
-            })
-            _update_counts(play_counts, defense_players, "defense")
-    
+
+        for poss_num in range(1, possessions_per_half + 1):
+            phases = ["offense", "defense"] if start_on_offense else ["defense", "offense"]
+
+            for phase in phases:
+                seq_num += 1
+                half_label = "1st" if half == 1 else "2nd"
+                poss_type = "Offense" if phase == "offense" else "Defense"
+
+                must_ids = must_next_offense if phase == "offense" else must_next_defense
+
+                selected, bench = _select_for_phase(
+                    available_players, play_counts, phase,
+                    qb if phase == "offense" else None,
+                    mode, must_ids, 7
+                )
+
+                if phase == "offense":
+                    assignment = _assign_offense(selected, qb)
+                    rank = compute_lineup_rank(assignment, OFFENSE_POSITION_RATINGS)
+                else:
+                    assignment = _assign_defense(selected)
+                    rank = compute_lineup_rank(assignment, DEFENSE_POSITION_RATINGS)
+
+                rank_label = friendly_rank_label(rank)
+                notes = _lineup_notes(selected, phase, rank_label)
+
+                all_possessions.append({
+                    "half": half,
+                    "possession": poss_num,
+                    "seq_num": seq_num,
+                    "type": poss_type,
+                    "label": f"{half_label} Half · Possession {poss_num} · {poss_type}",
+                    "assignment": {pos: p["name"] for pos, p in assignment.items()},
+                    "players": [p["name"] for p in selected],
+                    "players_out": [p["name"] for p in bench],
+                    "lineup_rank": rank,
+                    "rank_label": rank_label,
+                    "notes": notes,
+                })
+
+                # Update play counts
+                for p in selected:
+                    play_counts[p["id"]][phase] += 1
+
+                # Update no-sit-twice tracking
+                # Players in bench who are eligible for this phase
+                bench_ids = {p["id"] for p in bench}
+
+                if phase == "offense":
+                    must_next_offense = set()  # consumed; reset
+                    for p in bench:
+                        if p.get("offense_only"):
+                            # Only plays offense → carry to next offense
+                            must_next_offense.add(p["id"])
+                        else:
+                            # Two-way: must play the very next live possession (defense)
+                            must_next_defense.add(p["id"])
+                else:
+                    must_next_defense = set()  # consumed; reset
+                    for p in bench:
+                        if p.get("defense_only"):
+                            # Only plays defense → carry to next defense
+                            must_next_defense.add(p["id"])
+                        else:
+                            # Two-way: must play the very next live possession (offense)
+                            must_next_offense.add(p["id"])
+
     return all_possessions
 
-def _select_best_7(players, play_counts, side, qb, mode, exclude_flags=None):
-    eligible = [p for p in players if not any(p.get(f) for f in (exclude_flags or []))]
-    if len(eligible) <= 7:
-        return eligible
-    
-    rating_key = "offense_rating" if side == "offense" else "defense_rating"
-    
-    if mode == "Fair Rotation":
-        # Sort by play count (ascending) then rating (descending)
-        eligible_sorted = sorted(
-            eligible,
-            key=lambda p: (play_counts[p["id"]][side], -p.get(rating_key, 0))
-        )
-    elif mode == "Must-Win":
-        eligible_sorted = sorted(eligible, key=lambda p: -p.get(rating_key, 0))
-    else:  # Balanced
-        eligible_sorted = sorted(
-            eligible,
-            key=lambda p: (play_counts[p["id"]][side] * 0.5, -p.get(rating_key, 0) * 0.5)
-        )
-    
-    selected = []
-    if qb and side == "offense":
-        if qb in eligible_sorted:
-            selected.append(qb)
-            eligible_sorted.remove(qb)
-    
-    must_play = [p for p in eligible_sorted if p.get("must_play_more")]
-    others = [p for p in eligible_sorted if not p.get("must_play_more")]
-    
-    for p in must_play:
-        if len(selected) < 7:
-            selected.append(p)
-    for p in others:
-        if len(selected) < 7:
-            selected.append(p)
-    
-    return selected[:7]
 
-def _assign_offense(players, qb):
-    assignment = {}
+def _select_for_phase(
+    available_players: List[Dict],
+    play_counts: Dict[int, Dict[str, int]],
+    phase: str,
+    qb: Optional[Dict],
+    mode: str,
+    must_include_ids: Set[int],
+    size: int = 7,
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Select `size` players for a possession phase, enforcing must_include_ids (no-sit-twice).
+
+    Returns: (selected, bench) — bench are eligible players who didn't play.
+    """
+    if phase == "offense":
+        eligible = [p for p in available_players if not p.get("defense_only")]
+    else:
+        eligible = [p for p in available_players if not p.get("offense_only")]
+
+    if len(eligible) <= size:
+        return eligible, []
+
+    # Must-include bucket (no-sit-twice forced players)
+    must_play = [p for p in eligible if p["id"] in must_include_ids]
+
+    # QB is always locked in for offense
+    if phase == "offense" and qb and qb in eligible and qb not in must_play:
+        must_play.insert(0, qb)
+
+    # Safety: if must_play exceeds size, trim (this should never happen with default 10-player roster)
+    if len(must_play) > size:
+        must_play = must_play[:size]
+
+    remaining_slots = size - len(must_play)
+    other_eligible = [p for p in eligible if p not in must_play]
+
+    rating_key = "offense_rating" if phase == "offense" else "defense_rating"
+
+    def _sort_key(p: Dict):
+        must_more = -1000 if p.get("must_play_more") else 0
+        count = play_counts[p["id"]][phase]
+        rating = p.get(rating_key, 0)
+        if mode == "Fair Rotation":
+            return (must_more + count, -rating)
+        elif mode == "Must-Win":
+            return (must_more, -rating)
+        else:  # Balanced
+            return (must_more + count * 0.5, -rating * 0.5)
+
+    other_eligible.sort(key=_sort_key)
+
+    selected = must_play + other_eligible[:remaining_slots]
+    bench = [p for p in eligible if p not in selected]
+    return selected, bench
+
+
+def _assign_offense(players: List[Dict], qb: Optional[Dict]) -> Dict[str, Dict]:
+    assignment: Dict[str, Dict] = {}
     remaining = list(players)
+
+    # QB
     if qb and qb in remaining:
         assignment["QB"] = qb
         remaining.remove(qb)
     elif remaining:
-        # assign best qb_rating as QB
         best_qb = max(remaining, key=lambda x: x.get("qb_rating", 0))
         assignment["QB"] = best_qb
         remaining.remove(best_qb)
-    
-    # RB: fastest
+
+    # RB: best rb_rating
     if remaining:
         rb = max(remaining, key=lambda x: x.get("rb_rating", 0))
         assignment["RB"] = rb
         remaining.remove(rb)
+
     # Center: best center_rating
     if remaining:
         center = max(remaining, key=lambda x: x.get("center_rating", 0))
         assignment["Center"] = center
         remaining.remove(center)
+
     # WR1, WR2: best wr_rating
     for slot in ["WR1", "WR2"]:
         if remaining:
             wr = max(remaining, key=lambda x: x.get("wr_rating", 0))
             assignment[slot] = wr
             remaining.remove(wr)
-    # Slot1, Slot2
+
+    # Slot1, Slot2: best slot_rating
     for slot in ["Slot1", "Slot2"]:
         if remaining:
             sl = max(remaining, key=lambda x: x.get("slot_rating", 0))
             assignment[slot] = sl
             remaining.remove(sl)
+
     return assignment
 
-def _assign_defense(players):
-    assignment = {}
+
+def _assign_defense(players: List[Dict]) -> Dict[str, Dict]:
+    assignment: Dict[str, Dict] = {}
     remaining = list(players)
-    
+
     # Blitzer: best blitzer_rating
     if remaining:
         bl = max(remaining, key=lambda x: x.get("blitzer_rating", 0))
         assignment["Blitzer"] = bl
         remaining.remove(bl)
-    # Safety
+
+    # Safety: best safety_rating
     if remaining:
         sf = max(remaining, key=lambda x: x.get("safety_rating", 0))
         assignment["Safety"] = sf
         remaining.remove(sf)
-    # CB1, CB2
+
+    # CB1, CB2: best cb_rating
     for slot in ["CB1", "CB2"]:
         if remaining:
             cb = max(remaining, key=lambda x: x.get("cb_rating", 0))
             assignment[slot] = cb
             remaining.remove(cb)
-    # MLB
+
+    # MLB: best mlb_rating
     if remaining:
         mlb = max(remaining, key=lambda x: x.get("mlb_rating", 0))
         assignment["MLB"] = mlb
         remaining.remove(mlb)
-    # OLB1, OLB2
+
+    # OLB1, OLB2: best olb_rating
     for slot in ["OLB1", "OLB2"]:
         if remaining:
             olb = max(remaining, key=lambda x: x.get("olb_rating", 0))
             assignment[slot] = olb
             remaining.remove(olb)
+
     return assignment
 
-def _update_counts(play_counts, players, side):
-    for p in players:
-        if p["id"] in play_counts:
-            play_counts[p["id"]][side] += 1
 
-def _lineup_notes(players, assignment, side):
+def _lineup_notes(players: List[Dict], phase: str, rank_label: str) -> str:
     notes = []
-    if side == "offense":
-        avg = sum(p.get("offense_rating", 5) for p in players) / max(len(players), 1)
-    else:
-        avg = sum(p.get("defense_rating", 5) for p in players) / max(len(players), 1)
+    rating_key = "offense_rating" if phase == "offense" else "defense_rating"
+    avg = sum(p.get(rating_key, 5) for p in players) / max(len(players), 1)
+
     if avg >= 7.5:
         notes.append("Strong unit")
-    elif avg < 5.0:
-        notes.append("Developing unit")
-    return "; ".join(notes) if notes else ""
+    elif avg < 4.0:
+        notes.append("Developing unit — give extra coaching attention")
+
+    must_more = [p["name"] for p in players if p.get("must_play_more")]
+    if must_more:
+        notes.append(f"Must-play: {', '.join(must_more)}")
+
+    return "; ".join(notes) if notes else rank_label
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-plan generator kept for backward compat (wraps new engine)
+# ---------------------------------------------------------------------------
+def generate_game_plan(
+    available_players: List[Dict],
+    qb_half1_id: int,
+    qb_half2_id: int,
+    settings: Dict[str, Any],
+    mode: str = "Fair Rotation",
+) -> List[Dict]:
+    """Backward-compatible wrapper — returns offense-first sequence."""
+    plans = generate_game_plans(available_players, qb_half1_id, qb_half2_id, settings, mode)
+    return plans["offense_first"]

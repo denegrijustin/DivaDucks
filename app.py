@@ -20,6 +20,10 @@ if "settings" not in st.session_state:
     st.session_state.settings = load_settings()
 if "game_plan" not in st.session_state:
     st.session_state.game_plan = []
+if "game_plan_offense_first" not in st.session_state:
+    st.session_state.game_plan_offense_first = []
+if "game_plan_defense_first" not in st.session_state:
+    st.session_state.game_plan_defense_first = []
 if "current_possession_idx" not in st.session_state:
     st.session_state.current_possession_idx = 0
 
@@ -32,8 +36,8 @@ st.markdown(render_header("Dashboard"), unsafe_allow_html=True)
 
 st.markdown("""
 <div style="text-align:center; padding: 1rem;">
-    <h2 style="color: #4CAF50;">🏈 Welcome, Coach!</h2>
-    <p style="color: #CCCCCC; font-size: 1.1rem;">
+    <h2 style="color: #C9A84C;">🏈 Welcome, Coach!</h2>
+    <p style="color: #F2E8C8; font-size: 1.1rem;">
         Your Diva Ducks coaching command center is ready.<br>
         Use the sidebar to navigate between pages.
     </p>
@@ -50,10 +54,11 @@ with col1:
 with col2:
     qb_eligible = [p for p in active if p.get("qb_eligible")]
     st.metric("QB Eligible", len(qb_eligible))
-    game_plan = st.session_state.get("game_plan", [])
-    st.metric("Plan Generated", "Yes ✅" if game_plan else "No ❌")
+    has_plan = bool(st.session_state.get("game_plan_offense_first"))
+    st.metric("Plan Generated", "Yes ✅" if has_plan else "No ❌")
 
 with col3:
+    game_plan = st.session_state.get("game_plan", [])
     if game_plan:
         offense_poss = [p for p in game_plan if p["type"] == "Offense"]
         avg_rank = sum(p["lineup_rank"] for p in offense_poss) / max(len(offense_poss), 1)
@@ -68,9 +73,9 @@ st.markdown("---")
 st.markdown("""
 ### Quick Links
 - 👥 **Player Management** — Edit roster, skills, availability
-- 📋 **Game Planner** — Generate your lineup plan
-- 🎮 **Live Game View** — Sideline possession navigator
-- 📊 **Analytics** — Usage charts and stats
+- 📋 **Game Planner** — Generate both Offense-First and Defense-First plans
+- 🎮 **Live Game View** — Sideline possession navigator (toggle between versions)
+- 📊 **Analytics** — Usage charts, bench patterns, sit-twice analysis
 - ⚙️ **Settings** — Adjust game rules and weights
-- 📄 **Export PDF** — Print your 3-page game plan
+- 📄 **Export PDF** — Print your 3-page game plan (per version)
 """)

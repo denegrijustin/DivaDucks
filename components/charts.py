@@ -17,6 +17,17 @@ COLORS = {
     "bg_card":       "#1A1E1A",
 }
 
+def _base_layout(**extra) -> dict:
+    return dict(
+        paper_bgcolor=COLORS["bg_dark"],
+        plot_bgcolor=COLORS["bg_card"],
+        font=dict(color=COLORS["cream"], size=12),
+        legend=dict(bgcolor=COLORS["bg_card"], font=dict(color=COLORS["cream"])),
+        xaxis=dict(gridcolor="#2A2A2A", tickfont=dict(color=COLORS["cream"])),
+        yaxis=dict(gridcolor="#2A2A2A", tickfont=dict(color=COLORS["cream"])),
+        **extra,
+    )
+
 def usage_bar_chart(usage: Dict[str, Any]) -> go.Figure:
     if not usage:
         return go.Figure()
@@ -26,19 +37,18 @@ def usage_bar_chart(usage: Dict[str, Any]) -> go.Figure:
     defense_pcts = [usage[n]["defense_pct"] for n in names]
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(name="Offense %", x=names, y=offense_pcts, marker_color=COLORS["forest_light"]))
-    fig.add_trace(go.Bar(name="Defense %", x=names, y=defense_pcts, marker_color=COLORS["crimson"]))
+    fig.add_trace(go.Bar(name="Offense %", x=names, y=offense_pcts,
+                         marker_color=COLORS["forest_light"],
+                         marker_line_color=COLORS["gold"], marker_line_width=0.8))
+    fig.add_trace(go.Bar(name="Defense %", x=names, y=defense_pcts,
+                         marker_color=COLORS["crimson"],
+                         marker_line_color=COLORS["gold"], marker_line_width=0.8))
 
     fig.update_layout(
         barmode="group",
-        title=dict(text="Player Usage by Phase", font=dict(color=COLORS["cream"])),
-        paper_bgcolor=COLORS["bg_dark"],
-        plot_bgcolor=COLORS["bg_card"],
-        font_color=COLORS["cream"],
-        legend=dict(bgcolor=COLORS["bg_card"], font=dict(color=COLORS["cream"])),
+        title=dict(text="Player Usage by Phase", font=dict(color=COLORS["cream"], size=15)),
         xaxis_tickangle=-30,
-        xaxis=dict(gridcolor="#2A2A2A"),
-        yaxis=dict(gridcolor="#2A2A2A"),
+        **_base_layout(),
     )
     return fig
 
@@ -48,18 +58,15 @@ def lineup_rank_chart(game_plan: list) -> go.Figure:
 
     labels = [p["label"] for p in game_plan]
     ranks = [p["lineup_rank"] for p in game_plan]
-    colors_list = [COLORS["forest_light"] if p["type"] == "Offense" else COLORS["crimson"] for p in game_plan]
+    colors_list = [COLORS["forest_light"] if p["type"] == "Offense" else COLORS["crimson"]
+                   for p in game_plan]
 
     fig = go.Figure(go.Bar(x=labels, y=ranks, marker_color=colors_list,
                            marker_line_color=COLORS["gold"], marker_line_width=1))
     fig.update_layout(
-        title=dict(text="Lineup Rank per Possession", font=dict(color=COLORS["cream"])),
-        paper_bgcolor=COLORS["bg_dark"],
-        plot_bgcolor=COLORS["bg_card"],
-        font_color=COLORS["cream"],
-        xaxis_tickangle=-30,
-        xaxis=dict(gridcolor="#2A2A2A"),
-        yaxis=dict(gridcolor="#2A2A2A"),
+        title=dict(text="Lineup Rank per Possession", font=dict(color=COLORS["cream"], size=15)),
+        xaxis_tickangle=-45,
+        **_base_layout(),
     )
     return fig
 
@@ -87,9 +94,9 @@ def player_ratings_radar(player: Dict) -> go.Figure:
             angularaxis=dict(color=COLORS["cream"]),
         ),
         paper_bgcolor=COLORS["bg_dark"],
-        font_color=COLORS["cream"],
+        font=dict(color=COLORS["cream"]),
         title=dict(text=f"{player.get('name', 'Player')} — Skills Radar",
-                   font=dict(color=COLORS["cream"])),
+                   font=dict(color=COLORS["cream"], size=14)),
     )
     return fig
 
@@ -104,12 +111,79 @@ def qb_usage_pie(qb_usage: Dict[str, int]) -> go.Figure:
         labels=names, values=values, hole=0.45,
         marker=dict(colors=pie_colors[:len(names)],
                     line=dict(color=COLORS["gold"], width=2)),
-        textfont=dict(color=COLORS["dark"]),
+        textfont=dict(color=COLORS["cream"]),
     ))
     fig.update_layout(
-        title=dict(text="QB Possession Share", font=dict(color=COLORS["cream"])),
+        title=dict(text="QB Possession Share", font=dict(color=COLORS["cream"], size=15)),
         paper_bgcolor=COLORS["bg_dark"],
-        font_color=COLORS["cream"],
+        font=dict(color=COLORS["cream"]),
         legend=dict(font=dict(color=COLORS["cream"])),
+    )
+    return fig
+
+def bench_pattern_chart(bench_patterns: Dict[str, Any]) -> go.Figure:
+    """
+    Stacked bar chart showing total bench count and violation count per player.
+    """
+    if not bench_patterns:
+        return go.Figure()
+
+    names = sorted(bench_patterns.keys(),
+                   key=lambda n: bench_patterns[n]["total_bench"], reverse=True)
+    total_bench = [bench_patterns[n]["total_bench"] for n in names]
+    violations = [bench_patterns[n]["consecutive_violations"] for n in names]
+    bench_pct = [bench_patterns[n]["bench_pct"] for n in names]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Times Benched", x=names, y=total_bench,
+        marker_color=COLORS["forest_light"],
+        marker_line_color=COLORS["gold"], marker_line_width=0.8,
+        text=[f"{p:.0f}%" for p in bench_pct],
+        textposition="outside",
+        textfont=dict(color=COLORS["cream"]),
+    ))
+    fig.add_trace(go.Bar(
+        name="Consecutive-Sit Violations", x=names, y=violations,
+        marker_color=COLORS["crimson"],
+        marker_line_color=COLORS["gold"], marker_line_width=0.8,
+    ))
+
+    fig.update_layout(
+        barmode="group",
+        title=dict(text="Bench Load & Violation Count per Player",
+                   font=dict(color=COLORS["cream"], size=15)),
+        xaxis_tickangle=-30,
+        **_base_layout(),
+    )
+    return fig
+
+def sit_streak_chart(bench_patterns: Dict[str, Any]) -> go.Figure:
+    """Bar chart of max consecutive bench streak per player."""
+    if not bench_patterns:
+        return go.Figure()
+
+    names = sorted(bench_patterns.keys(),
+                   key=lambda n: bench_patterns[n]["max_consecutive_bench"], reverse=True)
+    max_streaks = [bench_patterns[n]["max_consecutive_bench"] for n in names]
+    bar_colors = [
+        COLORS["crimson"] if s >= 2 else COLORS["forest_light"]
+        for s in max_streaks
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=names, y=max_streaks, marker_color=bar_colors,
+        marker_line_color=COLORS["gold"], marker_line_width=0.8,
+        text=max_streaks, textposition="outside",
+        textfont=dict(color=COLORS["cream"]),
+    ))
+    fig.add_hline(y=1.5, line_dash="dash", line_color=COLORS["gold"],
+                  annotation_text="Violation threshold",
+                  annotation_font_color=COLORS["gold"])
+    fig.update_layout(
+        title=dict(text="Max Consecutive Bench Streak per Player",
+                   font=dict(color=COLORS["cream"], size=15)),
+        xaxis_tickangle=-30,
+        **_base_layout(),
     )
     return fig

@@ -11,6 +11,10 @@ if "players" not in st.session_state:
     st.session_state.players = load_players()
 if "settings" not in st.session_state:
     st.session_state.settings = load_settings()
+if "game_plan_offense_first" not in st.session_state:
+    st.session_state.game_plan_offense_first = []
+if "game_plan_defense_first" not in st.session_state:
+    st.session_state.game_plan_defense_first = []
 if "game_plan" not in st.session_state:
     st.session_state.game_plan = []
 if "current_possession_idx" not in st.session_state:
@@ -18,27 +22,62 @@ if "current_possession_idx" not in st.session_state:
 
 st.markdown(render_header("Live Game View"), unsafe_allow_html=True)
 
-game_plan = st.session_state.game_plan
+# ── Version selector ──────────────────────────────────────────────────────────
+has_offense = bool(st.session_state.game_plan_offense_first)
+has_defense = bool(st.session_state.game_plan_defense_first)
 
-if not game_plan:
-    st.warning("No game plan generated. Go to Game Planner to create one.")
+if not has_offense and not has_defense:
+    st.warning("⚠️ No game plan generated. Go to **Game Planner** to create one.")
     st.stop()
 
-total = len(game_plan)
-idx = st.session_state.current_possession_idx
+C = TEAM_COLORS
+version_options = []
+if has_offense:
+    version_options.append("🏈 Offense First")
+if has_defense:
+    version_options.append("🛡️ Defense First")
 
-# Navigation
+col_ver, col_reset = st.columns([3, 1])
+with col_ver:
+    selected_version = st.radio(
+        "Game-Flow Version",
+        version_options,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+with col_reset:
+    if st.button("⏮ Reset to Start", use_container_width=True):
+        st.session_state.current_possession_idx = 0
+        st.rerun()
+
+if "Offense" in selected_version:
+    game_plan = st.session_state.game_plan_offense_first
+    version_label = "Offense-First"
+else:
+    game_plan = st.session_state.game_plan_defense_first
+    version_label = "Defense-First"
+
+# Keep session game_plan in sync with selected version
+st.session_state.game_plan = game_plan
+
+total = len(game_plan)
+idx = min(st.session_state.current_possession_idx, total - 1)
+
+# ── Navigation ────────────────────────────────────────────────────────────────
 st.markdown("### 🎮 Possession Navigator")
 
-nav_cols = st.columns([1, 3, 1])
+nav_cols = st.columns([1, 4, 1])
 with nav_cols[0]:
     if st.button("⬅️ Previous", use_container_width=True, disabled=(idx == 0)):
         st.session_state.current_possession_idx = max(0, idx - 1)
         st.rerun()
 
 with nav_cols[1]:
-    progress_text = f"Possession {idx + 1} of {total}"
-    st.markdown(f"<h3 style='text-align:center; color:#4CAF50;'>{progress_text}</h3>", unsafe_allow_html=True)
+    progress_text = f"**{version_label}  —  Possession {idx + 1} of {total}**"
+    st.markdown(
+        f"<div style='text-align:center; color:{C['gold']}; font-size:1.1rem;'>{progress_text}</div>",
+        unsafe_allow_html=True,
+    )
     st.progress((idx + 1) / total)
 
 with nav_cols[2]:
@@ -46,12 +85,12 @@ with nav_cols[2]:
         st.session_state.current_possession_idx = min(total - 1, idx + 1)
         st.rerun()
 
-# Jump to possession
+# Jump selector
 jump = st.selectbox(
     "Jump to Possession",
     options=list(range(total)),
     format_func=lambda i: game_plan[i]["label"],
-    index=idx
+    index=idx,
 )
 if jump != idx:
     st.session_state.current_possession_idx = jump
@@ -59,30 +98,33 @@ if jump != idx:
 
 st.markdown("---")
 
-# Current possession
+# ── Current possession card ───────────────────────────────────────────────────
 current = game_plan[idx]
 render_possession_card(current, expanded=True)
 
-# Show next possession preview
+# ── Up-next preview ───────────────────────────────────────────────────────────
 if idx + 1 < total:
     st.markdown("### 👀 Up Next")
     render_possession_card(game_plan[idx + 1], expanded=False)
 
-# Quick overview strip
+# ── All-possessions strip ─────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### 📋 All Possessions")
+st.markdown("### 📋 Full Game Sequence")
 
-cols = st.columns(3)
+cols = st.columns(4)
 for i, poss in enumerate(game_plan):
     is_current = (i == idx)
-    border = "3px solid #4CAF50" if is_current else "1px solid #2A2F3E"
     icon = "🏈" if poss["type"] == "Offense" else "🛡️"
-    
-    with cols[i % 3]:
+    rank_label = poss.get("rank_label", "")
+    btn_label = f"{icon} {poss['label']}\n{rank_label} ({poss['lineup_rank']:.1f})"
+
+    with cols[i % 4]:
         if st.button(
-            f"{icon} {poss['label']}\nRank: {poss['lineup_rank']:.1f}",
+            btn_label,
             key=f"nav_{i}",
             use_container_width=True,
+            type="primary" if is_current else "secondary",
         ):
             st.session_state.current_possession_idx = i
             st.rerun()
+

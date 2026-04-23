@@ -6,10 +6,6 @@ def validate_game_plan_inputs(
     settings: Dict
 ) -> Tuple[bool, List[str]]:
     errors = []
-    warnings = []
-    
-    offense_only = [p for p in available_players if p.get("offense_only")]
-    defense_only = [p for p in available_players if p.get("defense_only")]
     
     offense_eligible = [p for p in available_players if not p.get("defense_only")]
     defense_eligible = [p for p in available_players if not p.get("offense_only")]
@@ -25,7 +21,7 @@ def validate_game_plan_inputs(
         errors.append("No QB selected. Please select at least one QB.")
     
     qb_players = [p for p in available_players if p["id"] in qb_eligible_ids]
-    if len(qb_players) == 0 and qb_eligible_ids:
+    if not qb_players and qb_eligible_ids:
         errors.append("Selected QB is not in the available players list.")
     
     if len(available_players) < 7:
@@ -42,9 +38,15 @@ def validate_players(players: List[Dict]) -> List[str]:
     qb_eligible = [p for p in players if p.get("qb_eligible") and not p.get("archived")]
     if not qb_eligible:
         warnings.append("No QB-eligible players. Mark at least one player as QB eligible.")
+    elif len(qb_eligible) == 1:
+        warnings.append(f"Only one QB eligible ({qb_eligible[0]['name']}). Consider a backup QB.")
     
     injured = [p["name"] for p in players if p.get("injured")]
     if injured:
         warnings.append(f"Injured players: {', '.join(injured)}")
+    
+    unavailable = [p["name"] for p in players if not p.get("available") and not p.get("archived") and not p.get("injured")]
+    if unavailable:
+        warnings.append(f"Marked unavailable: {', '.join(unavailable)}")
     
     return warnings

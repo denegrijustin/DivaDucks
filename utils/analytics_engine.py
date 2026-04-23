@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 def compute_usage(game_plan: List[Dict], available_players: List[Dict]) -> Dict[str, Any]:
     total_possessions = len(game_plan)
@@ -50,3 +50,71 @@ def player_role_fit(player: Dict) -> str:
         return "QB Leader"
     else:
         return "Versatile Player"
+
+
+def compute_bench_patterns(game_plan: List[Dict], available_players: List[Dict]) -> Dict[str, Any]:
+    """
+    For each player, compute bench streak statistics from the live game sequence.
+
+    Returns a dict keyed by player name with:
+        bench_sequence: list of bools (True = benched that possession)
+        total_bench: int
+        consecutive_violations: int  (times sat two in a row)
+        max_consecutive_bench: int
+        bench_pct: float
+    """
+    result = {}
+    for player in available_players:
+        name = player["name"]
+
+        # Build the bench sequence for eligible possessions only
+        bench_sequence: List[bool] = []
+        for poss in game_plan:
+            is_off = poss["type"] == "Offense"
+            # Skip possessions this player is not eligible for
+            if is_off and player.get("defense_only"):
+                continue
+            if not is_off and player.get("offense_only"):
+                continue
+            bench_sequence.append(name not in poss["players"])
+
+        # Compute statistics
+        total_poss = len(bench_sequence)
+        total_bench = sum(bench_sequence)
+
+        consecutive_violations = 0
+        max_streak = 0
+        current_streak = 0
+        for i, benched in enumerate(bench_sequence):
+            if benched:
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+                if i > 0 and bench_sequence[i - 1]:
+                    consecutive_violations += 1
+            else:
+                current_streak = 0
+
+        result[name] = {
+            "bench_sequence": bench_sequence,
+            "total_bench": total_bench,
+            "total_eligible": total_poss,
+            "consecutive_violations": consecutive_violations,
+            "max_consecutive_bench": max_streak,
+            "bench_pct": round(total_bench / max(total_poss, 1) * 100, 1),
+        }
+
+    return result
+
+
+def check_no_sit_twice_violations(game_plan: List[Dict], available_players: List[Dict]) -> List[str]:
+    """Return a list of violation strings if any player sat twice in a row."""
+    patterns = compute_bench_patterns(game_plan, available_players)
+    violations = []
+    for name, data in patterns.items():
+        v = data["consecutive_violations"]
+        if v > 0:
+            violations.append(
+                f"{name} sat twice in a row {v} time(s) "
+                f"(max bench streak: {data['max_consecutive_bench']})"
+            )
+    return violations
