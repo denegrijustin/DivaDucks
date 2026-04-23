@@ -1,0 +1,91 @@
+{
+  "offense_size": 7,
+  "defense_size": 7,
+  "possessions_per_half": 3,
+  "halves": 2,
+  "planning_mode": "Fair Rotation",
+  "fairness_weight": 0.5,
+  "strength_weight": 0.5,
+  "theme": "dark",
+  "rating_weights": {
+    "offense": {
+      "speed": 0.2,
+      "hands": 0.2,
+      "route_running": 0.15,
+      "offensive_iq": 0.2,
+      "stamina": 0.1,
+      "awareness": 0.15
+    },
+    "defense": {
+      "speed": 0.15,
+      "agility": 0.15,
+      "flag_pulling": 0.2,
+      "defense_iq": 0.2,
+      "stamina": 0.1,
+      "awareness": 0.1,
+      "toughness": 0.1
+    },
+    "qb": {
+      "throwing": 0.3,
+      "offensive_iq": 0.25,
+      "leadership": 0.2,
+      "awareness": 0.15,
+      "stamina": 0.1
+    },
+    "rb": {
+      "speed": 0.35,
+      "agility": 0.3,
+      "offensive_iq": 0.2,
+      "stamina": 0.15
+    },
+    "wr": {
+      "speed": 0.3,
+      "hands": 0.3,
+      "route_running": 0.25,
+      "offensive_iq": 0.15
+    },
+    "slot": {
+      "hands": 0.3,
+      "route_running": 0.25,
+      "awareness": 0.25,
+      "offensive_iq": 0.2
+    },
+    "center": {
+      "awareness": 0.25,
+      "leadership": 0.25,
+      "hands": 0.2,
+      "toughness": 0.15,
+      "offensive_iq": 0.15
+    },
+    "olb": {
+      "defense_iq": 0.3,
+      "flag_pulling": 0.3,
+      "awareness": 0.2,
+      "toughness": 0.2
+    },
+    "mlb": {
+      "defense_iq": 0.3,
+      "leadership": 0.25,
+      "awareness": 0.25,
+      "toughness": 0.2
+    },
+    "cb": {
+      "speed": 0.3,
+      "agility": 0.3,
+      "defense_iq": 0.2,
+      "awareness": 0.2
+    },
+    "safety": {
+      "speed": 0.3,
+      "awareness": 0.3,
+      "defense_iq": 0.25,
+      "leadership": 0.15
+    },
+    "blitzer": {
+      "speed": 0.3,
+      "agility": 0.25,
+      "toughness": 0.25,
+      "flag_pulling": 0.2
+    }
+  }
+}
