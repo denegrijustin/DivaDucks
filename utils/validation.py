@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Set
 
 def validate_game_plan_inputs(
     available_players: List[Dict],
@@ -50,3 +50,126 @@ def validate_players(players: List[Dict]) -> List[str]:
         warnings.append(f"Marked unavailable: {', '.join(unavailable)}")
     
     return warnings
+
+
+def validate_no_back_to_back_sits(lineup: List[Dict]) -> List[str]:
+    """
+    Walk the full ordered segment list and confirm no player appears in
+    players_out for two consecutive segments.
+    Returns list of violation description strings (empty = pass).
+    """
+    sorted_lineup = sorted(lineup, key=lambda p: p["seq_num"])
+    violations = []
+    for i in range(1, len(sorted_lineup)):
+        prev = sorted_lineup[i - 1]
+        curr = sorted_lineup[i]
+        prev_out = set(prev.get("players_out", []))
+        curr_out = set(curr.get("players_out", []))
+        overlap = prev_out & curr_out
+        if overlap:
+            violations.append(
+                f"Back-to-back sit: {', '.join(sorted(overlap))} "
+                f"({prev['label']} → {curr['label']})"
+            )
+    return violations
+
+
+def validate_offense_to_defense_no_repeat_sits(lineup: List[Dict]) -> List[str]:
+    """
+    Check each same-possession Offense→Defense pair (within each half):
+      - Offense 1 Out vs Defense 1 Out
+      - Offense 2 Out vs Defense 2 Out
+      - Offense 3 Out vs Defense 3 Out
+    Returns violation strings.
+    """
+    violations = []
+    for half in (1, 2):
+        for poss_num in range(1, 4):
+            offense_seg = next(
+                (p for p in lineup if p["half"] == half and p["possession"] == poss_num and p["type"] == "Offense"),
+                None
+            )
+            defense_seg = next(
+                (p for p in lineup if p["half"] == half and p["possession"] == poss_num and p["type"] == "Defense"),
+                None
+            )
+            if offense_seg is None or defense_seg is None:
+                continue
+            out_off = set(offense_seg.get("players_out", []))
+            out_def = set(defense_seg.get("players_out", []))
+            overlap = out_off & out_def
+            if overlap:
+                violations.append(
+                    f"Offense→Defense repeat sit: {', '.join(sorted(overlap))} "
+                    f"({offense_seg['label']} → {defense_seg['label']})"
+                )
+    return violations
+
+
+def validate_defense_to_next_offense_no_repeat_sits(lineup: List[Dict]) -> List[str]:
+    """
+    Check each Defense→next Offense transition:
+      - Defense 1 Out vs Offense 2 Out (same half)
+      - Defense 2 Out vs Offense 3 Out (same half)
+      - Defense 3 Out vs next half's Offense 1 Out
+    Returns violation strings.
+    """
+    violations = []
+    # Within-half transitions
+    for half in (1, 2):
+        for def_poss_num in range(1, 3):
+            defense_seg = next(
+                (p for p in lineup if p["half"] == half and p["possession"] == def_poss_num and p["type"] == "Defense"),
+                None
+            )
+            next_off_seg = next(
+                (p for p in lineup if p["half"] == half and p["possession"] == def_poss_num + 1 and p["type"] == "Offense"),
+                None
+            )
+            if defense_seg is None or next_off_seg is None:
+                continue
+            out_def = set(defense_seg.get("players_out", []))
+            out_off = set(next_off_seg.get("players_out", []))
+            overlap = out_def & out_off
+            if overlap:
+                violations.append(
+                    f"Defense→Offense repeat sit: {', '.join(sorted(overlap))} "
+                    f"({defense_seg['label']} → {next_off_seg['label']})"
+                )
+    # Half-boundary transition: 1H Defense 3 → 2H Offense 1
+    def3_seg = next(
+        (p for p in lineup if p["half"] == 1 and p["possession"] == 3 and p["type"] == "Defense"),
+        None
+    )
+    off1_h2_seg = next(
+        (p for p in lineup if p["half"] == 2 and p["possession"] == 1 and p["type"] == "Offense"),
+        None
+    )
+    if def3_seg and off1_h2_seg:
+        out_def3 = set(def3_seg.get("players_out", []))
+        out_off1_h2 = set(off1_h2_seg.get("players_out", []))
+        overlap = out_def3 & out_off1_h2
+        if overlap:
+            violations.append(
+                f"Half-boundary repeat sit: {', '.join(sorted(overlap))} "
+                f"({def3_seg['label']} → {off1_h2_seg['label']})"
+            )
+    return violations
+
+
+def validate_full_sit_flow(lineup: List[Dict]) -> Tuple[bool, List[str]]:
+    """
+    Run all three checks and return (all_pass, all_violations).
+    """
+    all_violations: List[str] = []
+    all_violations += validate_no_back_to_back_sits(lineup)
+    all_violations += validate_offense_to_defense_no_repeat_sits(lineup)
+    all_violations += validate_defense_to_next_offense_no_repeat_sits(lineup)
+    # Deduplicate while preserving order
+    seen: Set[str] = set()
+    unique: List[str] = []
+    for v in all_violations:
+        if v not in seen:
+            seen.add(v)
+            unique.append(v)
+    return len(unique) == 0, unique

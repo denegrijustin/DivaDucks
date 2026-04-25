@@ -340,6 +340,150 @@ def _lineup_notes(players: List[Dict], phase: str, rank_label: str) -> str:
     return "; ".join(notes) if notes else rank_label
 
 
+def repair_segment_from_previous(
+    previous_out: List[str],
+    current_segment: Dict,
+    roster: List[Dict],
+    position_rules: Dict[str, str],
+) -> Dict:
+    """
+    Given that `previous_out` contains players who sat in the previous segment,
+    repair `current_segment` so that none of those players appear in its
+    players_out list.
+
+    Strategy:
+    1. Identify conflict players (in both previous_out and current players_out).
+    2. For each conflict player, swap them back in by benching another player
+       who was NOT in previous_out.
+    3. Rebuild the assignment with the new selected set.
+    4. Return the repaired segment dict (or original if no conflicts).
+    """
+    segment = dict(current_segment)
+    is_offense = segment["type"] == "Offense"
+    prev_out_set = set(previous_out)
+
+    current_out_names = set(segment.get("players_out", []))
+    conflicts = prev_out_set & current_out_names
+    if not conflicts:
+        return segment  # No repair needed
+
+    # Build sets from current assignment (playing) and bench
+    current_playing_names = set(segment.get("players", []))
+
+    # Players that must come off the bench (were in previous_out and current bench)
+    must_play_in = list(conflicts)
+
+    # Candidates to bench: currently playing, NOT in previous_out
+    can_bench = [
+        name for name in current_playing_names
+        if name not in prev_out_set
+    ]
+
+    # Swap: bring in conflict players, bench can_bench players (as many as needed)
+    new_playing = set(current_playing_names)
+    new_out = set(current_out_names)
+
+    for conflict_player in must_play_in:
+        if can_bench:
+            swap_out = can_bench.pop(0)
+            new_playing.discard(swap_out)
+            new_out.discard(conflict_player)
+            new_playing.add(conflict_player)
+            new_out.add(swap_out)
+        else:
+            # Cannot repair — mark as unresolved, keep original
+            segment.setdefault("repair_warnings", [])
+            segment["repair_warnings"].append(
+                f"Could not remove {conflict_player} from bench "
+                f"(no eligible swap found)"
+            )
+
+    # Rebuild assignment from new_playing set using roster + position rules
+    player_map = {p["name"]: p for p in roster}
+    playing_players = [player_map[n] for n in new_playing if n in player_map]
+
+    if is_offense:
+        # Find QB (kept from original assignment if still playing)
+        qb_name = segment.get("assignment", {}).get("QB")
+        qb = player_map.get(qb_name) if qb_name else None
+        if qb and qb not in playing_players:
+            qb = None
+        new_assignment = _assign_offense(playing_players, qb)
+    else:
+        new_assignment = _assign_defense(playing_players)
+
+    segment["players"] = sorted(new_playing)
+    segment["players_out"] = sorted(new_out)
+    segment["assignment"] = {pos: p["name"] for pos, p in new_assignment.items()}
+
+    # Recompute rank
+    pos_ratings = OFFENSE_POSITION_RATINGS if is_offense else DEFENSE_POSITION_RATINGS
+    segment["lineup_rank"] = compute_lineup_rank(new_assignment, pos_ratings)
+    segment["rank_label"] = friendly_rank_label(segment["lineup_rank"])
+
+    return segment
+
+
+def repair_defense_outs_for_possession(
+    previous_out: List[str],
+    defense_lineup: Dict,
+    roster: List[Dict],
+    position_rules: Dict[str, str],
+) -> Dict:
+    """Repair a defense segment so no player from previous_out sits again."""
+    return repair_segment_from_previous(previous_out, defense_lineup, roster, position_rules)
+
+
+def repair_offense_outs_for_possession(
+    previous_out: List[str],
+    offense_lineup: Dict,
+    roster: List[Dict],
+    position_rules: Dict[str, str],
+) -> Dict:
+    """Repair an offense segment so no player from previous_out sits again."""
+    return repair_segment_from_previous(previous_out, offense_lineup, roster, position_rules)
+
+
+def repair_game_plan(
+    game_plan: List[Dict],
+    roster: List[Dict],
+) -> Tuple[List[Dict], List[str]]:
+    """
+    Walk the full sequential game plan and repair any back-to-back sit violations.
+    Returns (repaired_plan, warnings).
+    """
+    if not game_plan:
+        return game_plan, []
+
+    sorted_plan = sorted(game_plan, key=lambda p: p["seq_num"])
+    repaired: List[Dict] = [dict(sorted_plan[0])]
+    warnings: List[str] = []
+
+    for i in range(1, len(sorted_plan)):
+        prev = repaired[i - 1]
+        curr = dict(sorted_plan[i])
+        prev_out = prev.get("players_out", [])
+        curr_out = set(curr.get("players_out", []))
+        conflicts = set(prev_out) & curr_out
+        if conflicts:
+            repaired_seg = repair_segment_from_previous(prev_out, curr, roster, {})
+            repair_warns = repaired_seg.pop("repair_warnings", [])
+            if repair_warns:
+                warnings += repair_warns
+            # Check if repair succeeded
+            still_conflicts = set(prev_out) & set(repaired_seg.get("players_out", []))
+            if still_conflicts:
+                warnings.append(
+                    f"Could not fully repair {repaired_seg['label']}: "
+                    f"players still back-to-back: {', '.join(sorted(still_conflicts))}"
+                )
+            repaired.append(repaired_seg)
+        else:
+            repaired.append(curr)
+
+    return repaired, warnings
+
+
 # ---------------------------------------------------------------------------
 # Legacy single-plan generator kept for backward compat (wraps new engine)
 # ---------------------------------------------------------------------------
