@@ -998,7 +998,7 @@ def _make_field_card_pdf(lineup, roster, possessions_per_half):
             x = left_margin + label_col_w + ci * col_w
             entry = get_entry(lineup, half, phase, poss)
             out_str = (", ".join(entry["out"][:3])) if entry else ""
-            c.setFillColor(_PDF_BLACK)
+            c.setFillColor(_PDF_WHITE)
             c.drawString(x + 2, sit_y - row_h + 3, out_str[:20])
 
     c.save()
@@ -1277,8 +1277,8 @@ def render_tab_generate():
 
     col1, col2 = st.columns(2)
     with col1:
-        coaching_opts = ["Balanced", "Competitive", "Development"]
-        cm_map = {"Balanced": "balanced", "Competitive": "competitive",
+        coaching_opts = ["Balanced", "Equal PT", "Development"]
+        cm_map = {"Balanced": "balanced", "Equal PT": "equal_pt",
                   "Development": "development"}
         rev_cm = {v: k for k, v in cm_map.items()}
         sel_cm = st.radio(
