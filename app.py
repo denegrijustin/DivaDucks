@@ -24,7 +24,7 @@ from reportlab.lib.units import inch
 # ============================================================
 st.set_page_config(
     page_title="DivaDucks Lineup Optimizer",
-    page_icon="\U0001f986",
+    page_icon="🦆",
     layout="wide",
 )
 
@@ -256,14 +256,14 @@ def choose_sitters(eligible, n_sits, sit_counts, max_sits, mode, fits):
     def sort_key(name):
         sits = sit_counts[name]
         ov = overall_fit(fits[name]) if name in fits else 3.0
+        # Use name as deterministic tiebreaker to ensure reproducible results
         if mode in ("balanced", "equal_pt"):
-            tie = 0 if mode == "equal_pt" else random.uniform(0, 0.01)
-            return (sits, tie)
+            return (sits, name)
         elif mode == "strongest":
-            return (ov, random.uniform(0, 0.01))
+            return (ov, name)
         elif mode == "development":
-            return (-ov, random.uniform(0, 0.01))
-        return (sits, 0)
+            return (-ov, name)
+        return (sits, name)
 
     return sorted(pool, key=sort_key)[:n_sits]
 
@@ -469,7 +469,7 @@ def validate_sit_pairing_balance(lineup, possessions_per_half):
         if cnt > 2:
             issues.append(f"Pair ({pair[0]} & {pair[1]}) sit together {cnt}x (max 2)")
     for trio, cnt in trio_counts.items():
-        if cnt >= 3:
+        if cnt > 2:
             issues.append(
                 f"Trio ({trio[0]}, {trio[1]}, {trio[2]}) sit together {cnt}x (max 2)"
             )
@@ -586,7 +586,7 @@ def auto_fix_lineup(lineup, roster, possessions_per_half):
     segments = get_segments(possessions_per_half)
     issues_fixed = 0
 
-    for _pass in range(20):
+    for iteration in range(20):
         changed = False
         for idx in range(1, len(segments)):
             ph, pp, pr = segments[idx - 1]
@@ -603,8 +603,8 @@ def auto_fix_lineup(lineup, roster, possessions_per_half):
 
             next_out = set()
             if idx + 1 < len(segments):
-                nh, np_, nr = segments[idx + 1]
-                ne = get_entry(fixed, nh, np_, nr)
+                nh, next_phase, nr = segments[idx + 1]
+                ne = get_entry(fixed, nh, next_phase, nr)
                 if ne:
                     next_out = set(ne["out"])
 
@@ -847,7 +847,7 @@ def _make_full_pdf(lineup, roster, possessions_per_half, validations, optimizer_
     elements = []
 
     elements.append(Paragraph(
-        "\U0001f986 DivaDucks -- Game Lineup", styles["Title"]
+        "🦆 DivaDucks -- Game Lineup", styles["Title"]
     ))
     elements.append(Spacer(1, 0.1*inch))
 
@@ -942,7 +942,7 @@ def _make_field_card_pdf(lineup, roster, possessions_per_half):
     c.setFont("Helvetica-Bold", 14)
     c.setFillColor(_PDF_RED)
     c.drawString(0.4*inch, page_h - 0.35*inch,
-                 "\U0001f986 DivaDucks -- Field Card")
+                 "DivaDucks -- Field Card")
 
     segments = get_segments(possessions_per_half)
     n_cols = len(segments)
@@ -1613,7 +1613,7 @@ def main():
 
     st.markdown(
         "<h1 style='text-align:center;color:#C0392B'>"
-        "\U0001f986 DivaDucks Lineup Optimizer</h1>",
+        "🦆 DivaDucks Lineup Optimizer</h1>",
         unsafe_allow_html=True,
     )
 
