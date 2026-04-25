@@ -66,6 +66,7 @@ def build_pdf(
     usage: Dict,
     bench_patterns: Optional[Dict] = None,
     version_label: str = "",
+    rules_check: Optional[Dict] = None,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -82,7 +83,7 @@ def build_pdf(
     story += [PageBreak()]
     story += _half_page("2ND HALF GAME PLAN", half2, version_label)
     story += [PageBreak()]
-    story += _stats_page(players, usage, qb_usage, game_plan, bench_patterns, version_label)
+    story += _stats_page(players, usage, qb_usage, game_plan, bench_patterns, version_label, rules_check)
 
     doc.build(
         story,
@@ -230,11 +231,74 @@ def _possession_block(poss: Dict) -> list:
     return items
 
 
+# ── Rules check section ───────────────────────────────────────────────────────
+def _rules_check_section(rules_check: Dict) -> list:
+    """Render the rules check pass/fail summary as PDF flowables."""
+    items: list = []
+    items.append(Paragraph("HARD RULES CHECK", SECTION_STYLE))
+
+    passed = rules_check.get("pass", False)
+    violations = rules_check.get("violations", [])
+    repair_warnings = rules_check.get("repair_warnings", [])
+
+    status_text = "✓  ALL RULES PASSED" if passed else "✘  RULES VIOLATIONS DETECTED"
+    status_color = FOREST if passed else CRIMSON
+
+    status_style = ParagraphStyle(
+        "RulesStatus",
+        parent=_styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=status_color,
+        spaceAfter=4,
+    )
+    items.append(Paragraph(status_text, status_style))
+
+    # Sub-checks table
+    from utils.validation import (
+        validate_offense_to_defense_no_repeat_sits,
+        validate_defense_to_next_offense_no_repeat_sits,
+    )
+    game_plan = rules_check.get("game_plan", [])
+    if game_plan:
+        off_d_viols = validate_offense_to_defense_no_repeat_sits(game_plan)
+        def_o_viols = validate_defense_to_next_offense_no_repeat_sits(game_plan)
+        check_rows = [
+            ["Check", "Status"],
+            ["Offense → Defense no-repeat sits",
+             "✓  Pass" if not off_d_viols else f"✘  Fail ({len(off_d_viols)} violation(s))"],
+            ["Defense → Offense no-repeat sits",
+             "✓  Pass" if not def_o_viols else f"✘  Fail ({len(def_o_viols)} violation(s))"],
+            ["Full possession flow no-repeat sits",
+             "✓  Pass" if passed else f"✘  Fail ({len(violations)} violation(s))"],
+        ]
+        ct = Table(check_rows, colWidths=[4.0 * inch, 3.1 * inch])
+        ct.setStyle(_table_style())
+        items.append(ct)
+        items.append(Spacer(1, 0.06 * inch))
+
+    # List violations
+    if violations:
+        items.append(Paragraph("Violations:", BODY_STYLE))
+        for v in violations:
+            items.append(Paragraph(f"• {v}", OUT_STYLE))
+        items.append(Spacer(1, 0.04 * inch))
+
+    # Repair warnings
+    if repair_warnings:
+        items.append(Paragraph("Repair Notes:", BODY_STYLE))
+        for w in repair_warnings:
+            items.append(Paragraph(f"• {w}", OUT_STYLE))
+
+    return items
+
+
 # ── Stats / analytics page ────────────────────────────────────────────────────
 def _stats_page(
     players, usage, qb_usage, game_plan,
     bench_patterns: Optional[Dict] = None,
     version_label: str = "",
+    rules_check: Optional[Dict] = None,
 ) -> list:
     items: list = []
     items.append(Spacer(1, 0.42 * inch))
@@ -298,6 +362,11 @@ def _stats_page(
         bt = Table(bench_data, colWidths=[1.8*inch, 1.3*inch, 1.0*inch, 1.0*inch, 1.0*inch])
         bt.setStyle(_table_style())
         items.append(bt)
+        items.append(Spacer(1, 0.10 * inch))
+
+    # ── Rules check section ──────────────────────────────────────────────────
+    if rules_check is not None:
+        items += _rules_check_section(rules_check)
 
     return items
 

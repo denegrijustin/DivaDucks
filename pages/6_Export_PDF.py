@@ -21,6 +21,14 @@ if "game_plan_defense_first" not in st.session_state:
     st.session_state.game_plan_defense_first = []
 if "game_plan" not in st.session_state:
     st.session_state.game_plan = []
+if "rules_check_offense" not in st.session_state:
+    st.session_state.rules_check_offense = None
+if "rules_check_defense" not in st.session_state:
+    st.session_state.rules_check_defense = None
+if "repair_warnings_offense" not in st.session_state:
+    st.session_state.repair_warnings_offense = []
+if "repair_warnings_defense" not in st.session_state:
+    st.session_state.repair_warnings_defense = []
 
 players = st.session_state.players
 settings = st.session_state.settings
@@ -36,7 +44,7 @@ st.markdown("""
     <ul style="text-align:left; color:#F2E8C8; display:inline-block;">
         <li><b>Page 1:</b> 1st Half Game Plan</li>
         <li><b>Page 2:</b> 2nd Half Game Plan</li>
-        <li><b>Page 3:</b> Analytics, QB Plan, Player Usage Charts</li>
+        <li><b>Page 3:</b> Analytics, QB Plan, Player Usage Charts, Rules Check</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
@@ -50,6 +58,32 @@ if not has_offense and not has_defense:
 
 available = [p for p in enriched if not p.get("archived")]
 
+# ── Rules check status ────────────────────────────────────────────────────────
+off_check = st.session_state.rules_check_offense
+def_check = st.session_state.rules_check_defense
+
+rules_checked = off_check is not None or def_check is not None
+
+if not rules_checked:
+    st.warning("⚠️ Rules have not been checked yet. Please generate a plan on the **Game Planner** page first.")
+
+off_rules_pass = off_check is not None and off_check.get("pass", False)
+def_rules_pass = def_check is not None and def_check.get("pass", False)
+
+if rules_checked:
+    st.markdown("### 🔍 Rules Check Status")
+    rc1, rc2 = st.columns(2)
+    with rc1:
+        if off_rules_pass:
+            st.success("✔ Offense-First: All rules passed")
+        elif off_check is not None:
+            st.error(f"✘ Offense-First: {len(off_check.get('violations', []))} violation(s)")
+    with rc2:
+        if def_rules_pass:
+            st.success("✔ Defense-First: All rules passed")
+        elif def_check is not None:
+            st.error(f"✘ Defense-First: {len(def_check.get('violations', []))} violation(s)")
+
 # ── Version selector + export ─────────────────────────────────────────────────
 version_options = {}
 if has_offense:
@@ -57,7 +91,8 @@ if has_offense:
 if has_defense:
     version_options["🛡️ Defense First"] = ("defense_first", st.session_state.game_plan_defense_first)
 
-def _export_button(label: str, plan: list, version_key: str, enriched: list, settings: dict):
+def _export_button(label: str, plan: list, version_key: str, enriched: list, settings: dict,
+                   rules_result: dict, repair_warnings: list):
     """Render a generate + download block for one version."""
     usage = compute_usage(plan, available)
     qb_usage = compute_qb_usage(plan)
@@ -76,6 +111,23 @@ def _export_button(label: str, plan: list, version_key: str, enriched: list, set
         avg_def = sum(p["lineup_rank"] for p in defense_poss) / max(len(defense_poss), 1)
         st.metric("Avg Defense Rank", f"{avg_def:.1f}")
 
+    rules_passed = rules_result is not None and rules_result.get("pass", False)
+
+    if not rules_passed and rules_result is not None:
+        viols = rules_result.get("violations", [])
+        st.error(f"🚫 PDF export blocked: {len(viols)} hard rule violation(s). Fix in Game Planner first.")
+        return
+
+    # Build rules_check payload for PDF
+    rules_check_for_pdf = None
+    if rules_result is not None:
+        rules_check_for_pdf = {
+            "pass": rules_result["pass"],
+            "violations": rules_result.get("violations", []),
+            "repair_warnings": repair_warnings,
+            "game_plan": plan,
+        }
+
     btn_key = f"gen_pdf_{version_key}"
     if st.button(f"🖨️ Generate PDF — {label}", use_container_width=True, type="primary", key=btn_key):
         try:
@@ -83,6 +135,7 @@ def _export_button(label: str, plan: list, version_key: str, enriched: list, set
                 plan, enriched, settings, qb_usage, usage,
                 bench_patterns=bench_patterns,
                 version_label=label,
+                rules_check=rules_check_for_pdf,
             )
             show_success(f"PDF generated successfully — {label}!")
             st.download_button(
@@ -99,8 +152,15 @@ def _export_button(label: str, plan: list, version_key: str, enriched: list, set
 
 
 for display_label, (v_key, plan) in version_options.items():
+    is_offense_plan = v_key == "offense_first"
+    rules_result = off_check if is_offense_plan else def_check
+    repair_warnings = (
+        st.session_state.repair_warnings_offense
+        if is_offense_plan
+        else st.session_state.repair_warnings_defense
+    )
     with st.expander(f"📄 {display_label} Game Plan", expanded=True):
-        _export_button(display_label, plan, v_key, enriched, settings)
+        _export_button(display_label, plan, v_key, enriched, settings, rules_result, repair_warnings)
 
 # ── Bundle export (both) ──────────────────────────────────────────────────────
 if has_offense and has_defense:
@@ -110,15 +170,35 @@ if has_offense and has_defense:
 
     for col, (display_label, (v_key, plan)) in zip([col1, col2], version_options.items()):
         with col:
+            is_offense_plan = v_key == "offense_first"
+            rules_result = off_check if is_offense_plan else def_check
+            repair_warnings = (
+                st.session_state.repair_warnings_offense
+                if is_offense_plan
+                else st.session_state.repair_warnings_defense
+            )
+            rules_passed = rules_result is not None and rules_result.get("pass", False)
+            if not rules_passed and rules_result is not None:
+                st.error(f"🚫 {display_label}: rules failed, export blocked.")
+                continue
             usage = compute_usage(plan, available)
             qb_usage = compute_qb_usage(plan)
             bench_patterns = compute_bench_patterns(plan, available)
+            rules_check_for_pdf = None
+            if rules_result is not None:
+                rules_check_for_pdf = {
+                    "pass": rules_result["pass"],
+                    "violations": rules_result.get("violations", []),
+                    "repair_warnings": repair_warnings,
+                    "game_plan": plan,
+                }
             if st.button(f"⬇️ {display_label}", use_container_width=True, key=f"quick_{v_key}"):
                 try:
                     pdf_bytes = build_pdf(
                         plan, enriched, settings, qb_usage, usage,
                         bench_patterns=bench_patterns,
                         version_label=display_label,
+                        rules_check=rules_check_for_pdf,
                     )
                     st.download_button(
                         label=f"Save {display_label} PDF",
@@ -130,4 +210,3 @@ if has_offense and has_defense:
                     )
                 except Exception as e:
                     show_errors([f"PDF failed: {str(e)}"])
-

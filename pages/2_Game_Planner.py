@@ -2,8 +2,13 @@ import streamlit as st
 from utils.branding import get_css, render_header
 from utils.persistence import load_players, load_settings, save_players, save_settings
 from utils.rating_engine import enrich_players
-from utils.lineup_engine import generate_game_plans, select_qbs
-from utils.validation import validate_game_plan_inputs
+from utils.lineup_engine import generate_game_plans, select_qbs, repair_game_plan
+from utils.validation import (
+    validate_game_plan_inputs,
+    validate_full_sit_flow,
+    validate_offense_to_defense_no_repeat_sits,
+    validate_defense_to_next_offense_no_repeat_sits,
+)
 from utils.analytics_engine import (
     compute_usage, compute_qb_usage, check_no_sit_twice_violations
 )
@@ -24,6 +29,14 @@ if "game_plan_defense_first" not in st.session_state:
     st.session_state.game_plan_defense_first = []
 if "game_plan" not in st.session_state:
     st.session_state.game_plan = []
+if "rules_check_offense" not in st.session_state:
+    st.session_state.rules_check_offense = None
+if "rules_check_defense" not in st.session_state:
+    st.session_state.rules_check_defense = None
+if "repair_warnings_offense" not in st.session_state:
+    st.session_state.repair_warnings_offense = []
+if "repair_warnings_defense" not in st.session_state:
+    st.session_state.repair_warnings_defense = []
 
 players = st.session_state.players
 settings = st.session_state.settings
@@ -140,26 +153,25 @@ with col_plan:
                 settings,
                 mode=planning_mode,
             )
-            st.session_state.game_plan_offense_first = plans["offense_first"]
-            st.session_state.game_plan_defense_first = plans["defense_first"]
+
+            # Attempt repair for both plans
+            repaired_off, warn_off = repair_game_plan(plans["offense_first"], available_players)
+            repaired_def, warn_def = repair_game_plan(plans["defense_first"], available_players)
+
+            st.session_state.game_plan_offense_first = repaired_off
+            st.session_state.game_plan_defense_first = repaired_def
+            st.session_state.repair_warnings_offense = warn_off
+            st.session_state.repair_warnings_defense = warn_def
             # Default active plan = offense first
-            st.session_state.game_plan = plans["offense_first"]
+            st.session_state.game_plan = repaired_off
             st.session_state.current_possession_idx = 0
 
-            # Validate no-sit-twice
-            violations_off = check_no_sit_twice_violations(plans["offense_first"], available_players)
-            violations_def = check_no_sit_twice_violations(plans["defense_first"], available_players)
-            if violations_off or violations_def:
-                show_warnings(
-                    [f"[Offense-First] {v}" for v in violations_off]
-                    + [f"[Defense-First] {v}" for v in violations_def]
-                )
-            else:
-                show_success(
-                    f"Both plans generated! "
-                    f"{len(plans['offense_first'])} possessions each. "
-                    f"✅ No sit-twice violations."
-                )
+            # Run full rules check
+            off_pass, off_viols = validate_full_sit_flow(repaired_off)
+            def_pass, def_viols = validate_full_sit_flow(repaired_def)
+            st.session_state.rules_check_offense = {"pass": off_pass, "violations": off_viols}
+            st.session_state.rules_check_defense = {"pass": def_pass, "violations": def_viols}
+
             st.rerun()
         else:
             show_errors(["Could not determine QB assignments."])
@@ -175,10 +187,92 @@ with col_plan:
 
         render_summary_cards(st.session_state.game_plan, available_players)
 
+        # ── Rules Check Section ───────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### �� Rules Check")
+
+        def _render_rules_check(plan_label: str, rules_result: dict, repair_warnings: list):
+            if rules_result is None:
+                st.info(f"Rules check pending for {plan_label}.")
+                return False
+
+            off_d_viols = validate_offense_to_defense_no_repeat_sits(
+                st.session_state.game_plan_offense_first
+                if plan_label == "Offense-First"
+                else st.session_state.game_plan_defense_first
+            )
+            def_o_viols = validate_defense_to_next_offense_no_repeat_sits(
+                st.session_state.game_plan_offense_first
+                if plan_label == "Offense-First"
+                else st.session_state.game_plan_defense_first
+            )
+            full_pass = rules_result["pass"]
+            all_viols = rules_result["violations"]
+
+            off_d_pass = len(off_d_viols) == 0
+            def_o_pass = len(def_o_viols) == 0
+
+            st.markdown(f"**{plan_label}**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if off_d_pass:
+                    st.success("✔ Off→Def: Pass")
+                else:
+                    st.error("✘ Off→Def: Fail")
+            with col2:
+                if def_o_pass:
+                    st.success("✔ Def→Off: Pass")
+                else:
+                    st.error("✘ Def→Off: Fail")
+            with col3:
+                if full_pass:
+                    st.success("✔ Full Flow: Pass")
+                else:
+                    st.error("✘ Full Flow: Fail")
+
+            if all_viols:
+                with st.expander(f"⚠️ {len(all_viols)} violation(s) — click to expand"):
+                    for v in all_viols:
+                        st.warning(v)
+
+            if repair_warnings:
+                with st.expander(f"🔧 {len(repair_warnings)} repair note(s)"):
+                    for w in repair_warnings:
+                        st.info(w)
+
+            return full_pass
+
+        off_check = st.session_state.rules_check_offense
+        def_check = st.session_state.rules_check_defense
+        warn_off = st.session_state.repair_warnings_offense
+        warn_def = st.session_state.repair_warnings_defense
+
+        off_rules_pass = _render_rules_check("Offense-First", off_check, warn_off)
+        st.markdown("")
+        def_rules_pass = _render_rules_check("Defense-First", def_check, warn_def)
+
+        all_rules_pass = off_rules_pass and def_rules_pass
+        if not all_rules_pass and (off_check is not None or def_check is not None):
+            st.error("🚫 One or more hard rules failed. Fix violations before exporting.")
+        elif all_rules_pass:
+            st.success("✅ All hard rules passed. Plans are valid for export.")
+
 with col_preview:
     has_plans = bool(st.session_state.game_plan_offense_first)
+
+    # Determine if rules passed (gating)
+    off_check = st.session_state.rules_check_offense
+    def_check = st.session_state.rules_check_defense
+    rules_passed = (
+        off_check is not None and off_check["pass"]
+        and def_check is not None and def_check["pass"]
+    )
+
     if has_plans:
         st.markdown("### 📋 Game Plan Preview")
+
+        if not rules_passed and off_check is not None:
+            st.warning("⚠️ Hard rules have violations. Lineup display is shown below but PDF export is blocked until all rules pass.")
 
         version_tabs = st.tabs(["🏈 Offense First", "🛡️ Defense First"])
 
@@ -217,4 +311,3 @@ with col_preview:
         5. Two versions are created: **Offense First** and **Defense First**
         6. Set one as active to use in the Live Game View
         """)
-
